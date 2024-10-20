@@ -7,8 +7,8 @@ import qutip as qt
 import time
 from scipy.integrate import ode
 from itertools import product
-import multiprocessing
-from functools import partial
+from multiprocessing import Pool
+import functools
 
 # This dictionary maps string keys ('x', 'y', 'z', 'p', 'm', 'i') to functions that generate spin operators for a given dimension dim.
 opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
@@ -116,18 +116,6 @@ def run_simulation(parameters):
     for orientation in oris:
         B0 = b0 * orientation  # Magnetic field vector along orientation
         B_fields.append(B0)  
-    #     # Compute Hamiltonians for each orientation
-    #     Hzee = mkH1(dims, 0, B0) + mkH1(dims, 1, B0)  # Zeeman Hamiltonian for two spins
-    #     Hhfc_C = mkH12(dims, 0, 2, N5_C) + mkH12(dims, 1, 3, N1_C)
-    #     Hhfc_D = mkH12(dims, 0, 2, N5_D) + mkH12(dims, 1, 4, N1_D)
-    #     Hdee_C = mkH12(dims, 0, 1, ErC_Dee)
-    #     Hdee_D = mkH12(dims, 0, 1, ErD_Dee)
-    #     H0_C = Hzee + Hhfc_C + Hdee_C  # Total Hamiltonian for component C
-    #     H0_D = Hzee + Hhfc_D + Hdee_D  # Total Hamiltonian for component D
-        
-    #     # Append Hamiltonians to the list
-    #     H_C_list.append(H0_C.data)
-    #     H_D_list.append(H0_D.data)
 
     Ps = 1/4 * mkSpinOp(dims,[]) - mkH12(dims, 0, 1, np.identity(3))  # Singlet projection operator
 
@@ -197,27 +185,6 @@ def run_simulation(parameters):
     plotyc = yr_c_list
     plotyd = yr_d_list
 
-    # plt.figure(figsize=(10, 5))
-
-    # # Contour plot for component C
-    # plt.subplot(1, 2, 1)
-    # plt.tricontourf(plotlon, plotlat, plotyc, levels=20, cmap='plasma')
-    # plt.colorbar(label='Singlet Yield C')
-    # plt.title("Yield vs. orientation (Component C)")
-    # plt.xlabel("Longitude (deg)")
-    # plt.ylabel("Latitude (deg)")
-
-    # # Contour plot for component D
-    # plt.subplot(1, 2, 2)
-    # plt.tricontourf(plotlon, plotlat, plotyd, levels=20, cmap='plasma')
-    # plt.colorbar(label='Singlet Yield D')
-    # plt.xlabel("Longitude (deg)")
-    # plt.ylabel("Latitude (deg)")
-    # plt.title('Yield vs. orientation (Component D)')
-
-    # plt.tight_layout()
-    # plt.show()
-
     max_yield = max(plotyc)+max(plotyd)
     min_yield = min(plotyc)+min(plotyd)
     # total_yield_x = plotyc[0]+plotyd[0]
@@ -235,90 +202,51 @@ def run_simulation(parameters):
     # print('compass sensitivity = ', compass_sensitivity) 
     # print('chi = ', chi)
 
-# def sample_grid_params(params, param_ranges, num_samples_per_param):
-#     """
-#     Samples parameter values on a regular grid and returns parameter dictionaries.
-
-#     Args:
-#         params (dict): The original parameter dictionary.
-#         param_ranges (dict): A dictionary specifying the continuous ranges (start, stop) for each parameter.
-#         num_samples_per_param (int): The number of samples per parameter to generate.
-    
-#     Returns:
-#         List of dict: A list of parameter dictionaries with values sampled on a regular grid.
-#     """
-#     # Create a list of values for each parameter on the grid
-#     param_grid = {}
-    
-#     for param_name, param_range in param_ranges.items():
-#         if isinstance(param_range, (list, tuple)) and len(param_range) == 2:  # Continuous range (start, stop)
-#             start, stop = param_range
-#             param_grid[param_name] = np.logspace(start, num_samples_per_param, stop)
-    
-#     # Generate the Cartesian product of the grid values to get all combinations
-#     param_combinations = list(product(*param_grid.values()))
-    
-#     # Create a list to store the parameter dictionaries
-#     sampled_params_list = []
-    
-#     # For each combination, create a new parameter dictionary
-#     for combo in param_combinations:
-#         new_params = params.copy()  # Start with the original parameters
-#         for i, param_name in enumerate(param_grid.keys()):
-#             new_params[param_name] = combo[i]  # Set the parameter value from the combination
-#         sampled_params_list.append(new_params)  # Add the new parameter set to the list
-#     return sampled_params_list
-
-# def parallel_run_simulations(param_sets):
-#     """
-#     Runs simulations in parallel using multiprocessing.
-
-#     Args:
-#         param_sets (list): List of parameter sets (dictionaries) to run simulations with.
-#         num_processes (int): Number of processes to use for parallelization.
-    
-#     Returns:
-#         List of results from the simulations.
-#     """
-#     with multiprocessing.Pool() as pool:
-#         results = pool.map(run_simulation, param_sets)
-#     return results
-
-
-
 if __name__ == "__main__":
-    
-    # Define the parameters to vary and their respective ranges
-    param_ranges = {
-        'kCD': [-2, 6],
-        'kDC': [-2, 6]
-    }
-
     # Base parameter set
     params = {
         'b0': 1.4 * 2 * np.pi,  # Zeeman field strength in radians per microsecond
         'krC': 5.5,             # Default values, will be overridden
         'krD': 0.5,
         'kf': 1.0,
-        'kCD': 4.0,
-        'kDC': 4.0,
+        'kCDs': np.logspace(-2, 1, 6),
+        'kDCs': np.logspace(-2, 1, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10      # Number of samples (unused here, just an example)
     }
+    
+    # Get all combinations of kCDs and kDCs
+    kCDs = params['kCDs']
+    kDCs = params['kDCs']
+    combinations = list(product(kCDs, kDCs))
 
-    # Define the number of samples per parameter (resolution of the grid)
-    num_samples_per_param = 5  # Example value; adjust as needed
+    # Create a list of dictionaries, each with its own kCD and kDC
+    parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'], 
+                               'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'], 
+                               'kCD': kCD, 'kDC': kDC} for kCD, kDC in combinations]
 
-    # Call the function to generate parameter sets on a grid
-    sampled_params = sample_grid_params(params, param_ranges, num_samples_per_param)
+    # # Iterate over k12 values
+    # for i, kCD in enumerate(kCDs):
+    #     # Create a partial function with the fixed parameters oris, kr1, kr2, kf, and the current k12
+    #     f = partial(run_simulation, b0, dims, krC, krD, kf, num_orientation_samples, kCDs)
 
-    # Run simulations in parallel
-    results = parallel_run_simulations(sampled_params)
+    #     # Use multiprocessing to calculate the yield for each k21 in parallel
+    #     with multiprocessing.Pool() as pool:
+    #         y = pool.map(f, kDCs)
 
-    # Save the results (example with np.savez)
-    np.savez('simulation_results.npz', results=results)
+    #     # Store the calculated yields in the yields array
+    #     yields[i, :, :] = np.array(y)
 
-    # Optionally, print some results for inspection
-    for result in results:
-        print(result)
+    # # Save the results to an npz file
+    # np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
+    # Use multiprocessing to run the simulations in parallel
+    # Use multiprocessing to run the simulations in parallel
+    with Pool() as pool:
+        y = pool.map(run_simulation, parameter_combinations)
+
+    # Reshape the results into a structured format
+    yields = np.array(y).reshape((len(kCDs), len(kDCs), 3))  # 2 for yieldC and yieldD
+
+    # Save the results to a .npz file
+    np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
         
