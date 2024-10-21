@@ -7,8 +7,8 @@ import qutip as qt
 import time
 from scipy.integrate import ode
 from itertools import product
-from multiprocessing import Pool
-import functools
+import multiprocessing 
+from functools import partial 
 
 # This dictionary maps string keys ('x', 'y', 'z', 'p', 'm', 'i') to functions that generate spin operators for a given dimension dim.
 opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
@@ -196,21 +196,22 @@ def run_simulation(parameters):
     # print('total yield x=', total_yield_x)
     # print('total yeild y=', total_yield_y)
     # print('total yeild z=', total_yield_z)
-    print('minimum yield =', min_yield)
-    print('maximum yield =', max_yield)
-    print('average recombination yield =', avg_yield)
+    print(min_yield)
+    print(max_yield)
+    print(avg_yield)
     # print('compass sensitivity = ', compass_sensitivity) 
     # print('chi = ', chi)
+    return (min_yield, max_yield, avg_yield)
 
 if __name__ == "__main__":
     # Base parameter set
     params = {
         'b0': 1.4 * 2 * np.pi,  # Zeeman field strength in radians per microsecond
         'krC': 5.5,             # Default values, will be overridden
-        'krD': 0.5,
+        'krD': 0,
         'kf': 1.0,
-        'kCDs': np.logspace(-2, 1, 6),
-        'kDCs': np.logspace(-2, 1, 6),
+        'kCDs': np.logspace(-2, 4, 7),
+        'kDCs': np.logspace(-2, 4, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10      # Number of samples (unused here, just an example)
     }
@@ -218,35 +219,37 @@ if __name__ == "__main__":
     # Get all combinations of kCDs and kDCs
     kCDs = params['kCDs']
     kDCs = params['kDCs']
+
     combinations = list(product(kCDs, kDCs))
 
-    # Create a list of dictionaries, each with its own kCD and kDC
-    parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'], 
-                               'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'], 
-                               'kCD': kCD, 'kDC': kDC} for kCD, kDC in combinations]
+    # Prepare the yields array (len(kCDs) x len(kDCs) x 3)
+    yields = np.zeros((len(kCDs), len(kDCs), 3))
 
-    # # Iterate over k12 values
-    # for i, kCD in enumerate(kCDs):
-    #     # Create a partial function with the fixed parameters oris, kr1, kr2, kf, and the current k12
-    #     f = partial(run_simulation, b0, dims, krC, krD, kf, num_orientation_samples, kCDs)
+    # Create a list of parameter combinations for multiprocessing
+    parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
+                            'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
+                            'kCD': kCD, 'kDC': kDC} for kCD, kDC in combinations]
 
-    #     # Use multiprocessing to calculate the yield for each k21 in parallel
-    #     with multiprocessing.Pool() as pool:
-    #         y = pool.map(f, kDCs)
+    # Run simulations in parallel using multiprocessing
+    with multiprocessing.Pool(processes=16) as pool:
+        results = pool.map(run_simulation, parameter_combinations)
 
-    #     # Store the calculated yields in the yields array
-    #     yields[i, :, :] = np.array(y)
-
-    # # Save the results to an npz file
-    # np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
-    # Use multiprocessing to run the simulations in parallel
-    # Use multiprocessing to run the simulations in parallel
-    with Pool() as pool:
-        y = pool.map(run_simulation, parameter_combinations)
-
-    # Reshape the results into a structured format
-    yields = np.array(y).reshape((len(kCDs), len(kDCs), 3))  # 2 for yieldC and yieldD
+    # Store the results in the yields array
+    for idx, (kCD, kDC) in enumerate(combinations):
+        i = np.where(kCDs == kCD)[0][0]
+        j = np.where(kDCs == kDC)[0][0]
+        yields[i, j, :] = results[idx]
 
     # Save the results to a .npz file
     np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
+
+    # Use multiprocessing to run the simulations in parallel
+    # with Pool() as pool:
+    #     y = pool.map(run_simulation, parameter_combinations)
+
+    # # Reshape the results into a structured format
+    # yields = np.array(y)
+
+    # # Save the results to a .npz file
+    # np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
         
