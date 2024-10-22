@@ -15,7 +15,7 @@ if yields.shape != (len(kCDs), len(kDCs)):
 
 # Create the contour plot
 plt.figure(figsize=(8, 6))
-contour = plt.contourf(KCD, KDC, yields, levels=20, cmap="viridis")  
+contour = plt.contourf(KCD, KDC, yields.T, levels=20, cmap="viridis")  
 plt.colorbar(contour, label='Yield Value')  # Add a color bar
 plt.xlabel('kCDs')
 plt.ylabel('kDCs')
@@ -23,4 +23,3 @@ plt.title('Contour Plot of Compass Sensitivity Values')
 plt.xscale('log')  # Log scale for kCDs
 plt.yscale('log')  # Log scale for kDCs
 plt.show()
-# print(file['yields'])

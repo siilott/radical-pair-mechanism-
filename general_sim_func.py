@@ -210,7 +210,7 @@ if __name__ == "__main__":
         'krC': 5.5,             # Default values, will be overridden
         'krD': 0,
         'kf': 1.0,
-        'kCDs': np.logspace(-2, 4, 7),
+        'kCDs': np.logspace(-2, 4, 7), # change the number of points so that there a slightly more points for one of the rate constants than the other (retu)
         'kDCs': np.logspace(-2, 4, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10      # Number of samples (unused here, just an example)
