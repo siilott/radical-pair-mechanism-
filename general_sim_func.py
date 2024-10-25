@@ -8,7 +8,6 @@ import time
 from scipy.integrate import ode
 from itertools import product
 import multiprocessing 
-from functools import partial 
 
 # This dictionary maps string keys ('x', 'y', 'z', 'p', 'm', 'i') to functions that generate spin operators for a given dimension dim.
 opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
@@ -39,6 +38,25 @@ def mkH12(dims, ind1, ind2, parmat):
             if parmat[i,j] != 0:
                 ops.append(parmat[i,j] * mkSpinOp(dims, [(ind1,axes[i]), (ind2,axes[j])]))
     return functools.reduce(lambda a, b: a + b, ops) # Uses functools.reduce to sum these interaction terms.
+
+def point_dipole_dipole_coupling(r):
+ 
+    # H = - \frac{ \mu_0 }{ 4 \pi } \frac{ \gamma_j \gamma_k \hbar^2}{ r_{jk}^3 }
+    #       \left( 3 (\bold{I}_j \cdot \bold{e}_{jk})  (\bold{I}_k \cdot \bold{e}_{jk}) - \bold{I}_j \cdot \bold{I}_k \right)
+ 
+    dr3 = -4*np.pi*1e-7 * (2.0023193043617 * 9.27400968e-24)**2 / (4*np.pi*1e-30)/6.62606957e-34/1e6 # MHz * A^3
+ 
+    if np.isscalar(r):
+        # assume r is aligned with z
+        d = dr3 / r**3
+        A = np.diag([-d, -d, 2*d])
+    else:
+        norm_r = np.linalg.norm(r)
+        d = dr3 / norm_r**3
+        e = r / norm_r
+        A = d * (3 * e[:,np.newaxis] * e[np.newaxis,:] - np.eye(3))
+ 
+    return A
 
 N5_C =  2*np.pi* np.array([[-0.36082693, -0.0702137 , -1.41518116],
       [-0.0702137 , -0.60153649,  0.32312139],
@@ -242,14 +260,3 @@ if __name__ == "__main__":
 
     # Save the results to a .npz file
     np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
-
-    # Use multiprocessing to run the simulations in parallel
-    # with Pool() as pool:
-    #     y = pool.map(run_simulation, parameter_combinations)
-
-    # # Reshape the results into a structured format
-    # yields = np.array(y)
-
-    # # Save the results to a .npz file
-    # np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
-        
