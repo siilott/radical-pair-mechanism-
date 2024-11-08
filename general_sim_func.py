@@ -8,7 +8,7 @@ import time
 from scipy.integrate import ode
 from itertools import product
 import multiprocessing 
-
+start_time = time.time()
 # This dictionary maps string keys ('x', 'y', 'z', 'p', 'm', 'i') to functions that generate spin operators for a given dimension dim.
 opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
              'y': lambda dim: qt.spin_Jy((dim-1)/2),
@@ -39,10 +39,47 @@ def mkH12(dims, ind1, ind2, parmat):
                 ops.append(parmat[i,j] * mkSpinOp(dims, [(ind1,axes[i]), (ind2,axes[j])]))
     return functools.reduce(lambda a, b: a + b, ops) # Uses functools.reduce to sum these interaction terms.
 
+
+# N5_C =  2*np.pi* np.array([[-0.36082693, -0.0702137 , -1.41518116],
+#       [-0.0702137 , -0.60153649,  0.32312139],
+#       [-1.41518116,  0.32312139, 50.80213093]]) # in MHz
+	  
+# N1_C = 2*np.pi*np.array([[  2.13814981,   3.19255832,  -2.48895215],
+#       [  3.19255832,  15.45032887, -12.44778343],
+#       [ -2.48895215, -12.44778343,  12.49532827]]) # in MHz
+
+# N5_D =  2*np.pi*np.array([[-2.94412424e-01, -5.68059200e-02, -1.02860888e+00],
+#       [-5.68059200e-02, -5.40578469e-01, -2.67686240e-02],
+#       [-1.02860888e+00, -2.67686240e-02,  5.05815320e+01]]) # in MHz
+	  
+# N1_D = 2*np.pi* np.array([[ 0.98491908,  3.28010265, -0.53784491],
+#       [ 3.28010265, 25.88547678, -1.6335986 ],
+#       [-0.53784491, -1.6335986 ,  1.41368001]]) # in MHz
+
+# ErC_Dee =  np.array([[ 26.47042689, -55.90357828,  50.1679204 ],
+#                             [-55.90357828, -20.86385225,  76.13493805],
+#                              [ 50.1679204,  76.13493805,  -5.60657464]]) # in Mrad/s
+
+# ErD_Dee = np.array([[ 11.08087889, -34.6687169,   12.14623706],
+#                             [-34.6687169,  -33.09039672,  22.36229081],
+#                             [ 12.14623706,  22.36229081,  22.00951783]]) #  in Mrad/s
+
+
+
+#  Function to sample points on a Fibonacci sphere
+def fibonacci_sphere(samples):
+    phi = np.pi * (3. - np.sqrt(5.))  # Golden angle in radians
+    xyz = []
+    for i in range(samples):
+        y = 1 - (i / float(samples - 1)) * 2  # y goes from 1 to -1
+        radius = np.sqrt(1 - y * y)  # Radius at y
+        theta = phi * i  # Golden angle increment
+        x = np.cos(theta) * radius
+        z = np.sin(theta) * radius
+        xyz.append([x, y, z])
+    return np.array(xyz)
+
 def point_dipole_dipole_coupling(r):
- 
-    # H = - \frac{ \mu_0 }{ 4 \pi } \frac{ \gamma_j \gamma_k \hbar^2}{ r_{jk}^3 }
-    #       \left( 3 (\bold{I}_j \cdot \bold{e}_{jk})  (\bold{I}_k \cdot \bold{e}_{jk}) - \bold{I}_j \cdot \bold{I}_k \right)
  
     dr3 = -4*np.pi*1e-7 * (2.0023193043617 * 9.27400968e-24)**2 / (4*np.pi*1e-30)/6.62606957e-34/1e6 # MHz * A^3
  
@@ -58,42 +95,19 @@ def point_dipole_dipole_coupling(r):
  
     return A
 
-N5_C =  2*np.pi* np.array([[-0.36082693, -0.0702137 , -1.41518116],
-      [-0.0702137 , -0.60153649,  0.32312139],
-      [-1.41518116,  0.32312139, 50.80213093]]) # in MHz
-	  
-N1_C = 2*np.pi*np.array([[  2.13814981,   3.19255832,  -2.48895215],
-      [  3.19255832,  15.45032887, -12.44778343],
-      [ -2.48895215, -12.44778343,  12.49532827]]) # in MHz
+def compute_zyz_rotation_tensor(psi, theta, phi):
+    def Ry(gamma):
+        return np.matrix([[ m.cos(gamma), 0, m.sin(gamma)],
+                        [ 0           , 1, 0           ],
+                        [-m.sin(gamma), 0, m.cos(gamma)]])
+    
+    def Rz(gamma):
+        return np.matrix([[ m.cos(gamma), -m.sin(gamma), 0 ],
+                        [ m.sin(gamma), m.cos(gamma) , 0 ],
+                        [ 0           , 0            , 1 ]])
 
-N5_D =  2*np.pi*np.array([[-2.94412424e-01, -5.68059200e-02, -1.02860888e+00],
-      [-5.68059200e-02, -5.40578469e-01, -2.67686240e-02],
-      [-1.02860888e+00, -2.67686240e-02,  5.05815320e+01]]) # in MHz
-	  
-N1_D = 2*np.pi* np.array([[ 0.98491908,  3.28010265, -0.53784491],
-      [ 3.28010265, 25.88547678, -1.6335986 ],
-      [-0.53784491, -1.6335986 ,  1.41368001]]) # in MHz
-
-ErC_Dee =  np.array([[ 26.47042689, -55.90357828,  50.1679204 ],
-                            [-55.90357828, -20.86385225,  76.13493805],
-                             [ 50.1679204,  76.13493805,  -5.60657464]]) # in Mrad/s
-
-ErD_Dee = np.array([[ 11.08087889, -34.6687169,   12.14623706],
-                            [-34.6687169,  -33.09039672,  22.36229081],
-                            [ 12.14623706,  22.36229081,  22.00951783]]) #  in Mrad/s
-
-# Function to sample points on a Fibonacci sphere
-def fibonacci_sphere(samples):
-    phi = np.pi * (3. - np.sqrt(5.))  # Golden angle in radians
-    xyz = []
-    for i in range(samples):
-        y = 1 - (i / float(samples - 1)) * 2  # y goes from 1 to -1
-        radius = np.sqrt(1 - y * y)  # Radius at y
-        theta = phi * i  # Golden angle increment
-        x = np.cos(theta) * radius
-        z = np.sin(theta) * radius
-        xyz.append([x, y, z])
-    return np.array(xyz)
+    R = Rz(psi) * Ry(theta) * Rz(phi)
+    return R
 
 # Function to perform the simulation
 def run_simulation(parameters):
@@ -105,6 +119,10 @@ def run_simulation(parameters):
     kDC = parameters['kDC']
     num_orientation_samples = parameters['num_orientation_samples']
     dims = parameters['dims'] # Dimensions of system components (2 qubits, 1 spin-1 nucleus) 
+    r = parameters['r']
+    psi = parameters['psi']
+    theta = parameters['theta']
+    phi = parameters['phi']
     
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
@@ -140,7 +158,7 @@ def run_simulation(parameters):
     rho0_C = (Ps / Ps.tr()).full().flatten()  # Initial density matrix for singlet state
     rho0_D = np.zeros_like(rho0_C)
     initial_state = np.concatenate((rho0_C, rho0_D)).flatten()
-    Ps = Ps.data
+    Ps = Ps.data.as_scipy()
 
     def mesolve(t, combined_rho, P_s, HA, HB, dimA, dimB):
         # Reshape rho back to a matrix
@@ -159,6 +177,10 @@ def run_simulation(parameters):
     yr_c_list = []  # List to store singlet yield for component C
     yr_d_list = []  # List to store singlet yield for component D
 
+    rotation = compute_zyz_rotation_tensor(psi, theta, phi)
+    # rotated_ErC_Dee= rotation @ ErC_Dee @ rotation.T
+    #rotated_ErD_Dee= rotation @ ErD_Dee @ rotation.T
+
     for field in B_fields:
         #Compute Hamiltonians for each orientation
         Hzee = mkH1(dims, 0, field) + mkH1(dims, 1, field)  # Zeeman Hamiltonian for two spins
@@ -168,8 +190,8 @@ def run_simulation(parameters):
         Hdee_D = mkH12(dims, 0, 1, ErD_Dee)
         H0_C = Hzee + Hhfc_C + Hdee_C  # Total Hamiltonian for component C
         H0_D = Hzee + Hhfc_D + Hdee_D  # Total Hamiltonian for component D
-        H_C = H0_C.data
-        H_D = H0_D.data
+        H_C = H0_C.data.as_scipy()
+        H_D = H0_D.data.as_scipy()
 
         # Create the solver instance
         solver = ode(mesolve).set_integrator('zvode', atol=1e-7, rtol=1e-6, method='adams', order=12)
@@ -232,21 +254,29 @@ if __name__ == "__main__":
         'kDCs': np.logspace(-2, 4, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10      # Number of samples (unused here, just an example)
+        'rs': np.linspace(1.0, 10.0, 5)
+        'psis': np.linspace(0, np.pi/2, 5)
+        'thetas': np.linspace(0, np.pi/4, 5)
+        'phis': np.linspace(0, np.pi/2, 5)
     }
     
     # Get all combinations of kCDs and kDCs
     kCDs = params['kCDs']
     kDCs = params['kDCs']
+    rs = params['rs']
+    psis = params['psis']
+    thetas = params['thetas']
+    phis = params['phis']
 
-    combinations = list(product(kCDs, kDCs))
+    combinations = list(product(kCDs, kDCs, rs, psis, thetas, phis))
 
     # Prepare the yields array (len(kCDs) x len(kDCs) x 3)
-    yields = np.zeros((len(kCDs), len(kDCs), 3))
+    yields = np.zeros((len(kCDs), len(kDCs), len(rs), len(psis), len(thetas), len(phis), 3))
 
     # Create a list of parameter combinations for multiprocessing
     parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
                             'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': kCD, 'kDC': kDC} for kCD, kDC in combinations]
+                            'kCD': kCD, 'kDC': kDC, 'r': r, 'psi': psi, 'theta': theta, 'phi': phi } for kCD, kDC, r, psi, theta, phi in combinations]
 
     # Run simulations in parallel using multiprocessing
     with multiprocessing.Pool(processes=16) as pool:
@@ -260,3 +290,4 @@ if __name__ == "__main__":
 
     # Save the results to a .npz file
     np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
+    print("--- %s seconds ---" % (time.time() - start_time))
