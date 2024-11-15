@@ -118,12 +118,12 @@ def compute_zxz_rotation_tensor(orientation):
     theta = orientation[1]
     phi = orientation[2]
     def Rx(gamma):
-        return np.matrix([[ 1, 0           , 0           ],
+        return np.array([[ 1, 0           , 0           ],
                         [ 0, np.cos(gamma),-np.sin(gamma)],
                         [ 0, np.sin(gamma), np.cos(gamma)]])
     
     def Rz(gamma):
-        return np.matrix([[ np.cos(gamma), -np.sin(gamma), 0 ],
+        return np.array([[ np.cos(gamma), -np.sin(gamma), 0 ],
                         [ np.sin(gamma), np.cos(gamma) , 0 ],
                         [ 0           , 0            , 1 ]])
 
@@ -217,7 +217,7 @@ def run_simulation(parameters):
     for field in B_fields:
         #Compute Hamiltonians for each orientation
         Hzee = mkH1(dims, 0, field) + mkH1(dims, 1, field)  # Zeeman Hamiltonian for two spins
-        Hhfc_C = mkH12(dims, 0, 2, N5_rotated) + mkH12(dims, 1, 3, N10_rotated)
+        Hhfc_C = mkH12(dims, 0, 2, N5_rotated) + mkH12(dims, 1, 3, N1_rotated)
         Hhfc_D = mkH12(dims, 0, 2, N1_rotated) + mkH12(dims, 1, 4, H1_rotated)
         Hdee_C = mkH12(dims, 0, 1, ErFAD_Dee)
         Hdee_D = mkH12(dims, 0, 1, ErTrp_Dee)
@@ -287,7 +287,7 @@ if __name__ == "__main__":
         'kDCs': np.logspace(-2, 4, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10,      # Number of samples (unused here, just an example)
-        'FAD_rs': [[1.05272,	0.474844,	9.61309*10**-17],
+        'FAD_rs':[[1.05272,	0.474844,	9.61309*10**-17],
         [0.349471,	-0.685166,	-0.0232927],
         [1.05867,	-1.91279,	-0.0166991],
         [0.429269,	-3.15141,	-0.0697218],
@@ -313,10 +313,10 @@ if __name__ == "__main__":
         [1.40985,	-2.74558,	0.030763],
         [2.11628,	-1.51743,	0.012728],
         [1.36023,	-0.363978,	0.]], # Coordinates of core (i.e. ring) atoms of Trp cantered on centre of spin density and aligned to molecular axes (first column: atomic number; columns 2 to 4: x, y, and z-coordinates in Angstroms)
-        'FAD_orientation': [119.982, 129.967, 353.895], # Euler angles to be used in rotation tensors 
-        'Trp_orientation': [70.,	81.5553, 1.12128],
-        'FAD_d': [10.1746,-13.3164,5.18675], # dislacement vector for FAD
-        'Trp_d': [9.21606,-18.14,3.32885] # displacemet vector for Trp 
+        'FAD_orientation': np.array([119.982, 129.967, 353.895]), # Euler angles to be used in rotation tensors 
+        'Trp_orientation': np.array([70.,	81.5553, 1.12128]),
+        'FAD_d': np.array([10.1746,-13.3164,5.18675]), # dislacement vector for FAD
+        'Trp_d': np.array([9.21606,-18.14,3.32885]) # displacemet vector for Trp 
     }
     
     # Get all combinations of kCDs and kDCs
@@ -327,24 +327,26 @@ if __name__ == "__main__":
 
     combinations = list(product(kCDs, kDCs, FAD_rs, Trp_rs))
 
-    # Prepare the yields array (len(kCDs) x len(kDCs) x 3)
+    #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
     yields = np.zeros((len(kCDs), len(kDCs), len(FAD_rs), len(Trp_rs), 3))
 
-    # Create a list of parameter combinations for multiprocessing
+    #Create a list of parameter combinations for multiprocessing
     parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
                             'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': kCD, 'kDC': kDC,'FAD_r':FAD_r, 'Trp_r': Trp_r, 'FAD_orientation':params['FAD_orientation'], 'Trp_orientation': params['Trp_orientation'], 'FAD_d': params['FAD_d'], 'Trp_d': params['Trp_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
+                            'kCD': kCD, 'kDC': kDC,'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'FAD_orientation':params['FAD_orientation'], 'Trp_orientation': params['Trp_orientation'], 'FAD_d': params['FAD_d'], 'Trp_d': params['Trp_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
 
     # Run simulations in parallel using multiprocessing
-    with multiprocessing.Pool(processes=16) as pool:
+    with multiprocessing.Pool() as pool:
         results = pool.map(run_simulation, parameter_combinations)
 
     # Store the results in the yields array
-    for idx, (kCD, kDC) in enumerate(combinations):
+    for idx, (kCD, kDC, FAD_r, Trp_r ) in enumerate(combinations): #+FAD_r, Trp_r?
         i = np.where(kCDs == kCD)[0][0]
         j = np.where(kDCs == kDC)[0][0]
-        yields[i, j, :] = results[idx]
+        k = np.where(FAD_rs == FAD_rs)[0][0]
+        l = np.where(Trp_rs == Trp_rs)[0][0]
+        yields[i, j, k, l, :] = results[idx]
 
     # Save the results to a .npz file
-    np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, yields=yields)
+    np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, FAD_rs == FAD_rs, Trp_rs == Trp_rs, yields=yields)
     print("--- %s seconds ---" % (time.time() - start_time))
