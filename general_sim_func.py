@@ -64,9 +64,27 @@ def mkH12(dims, ind1, ind2, parmat):
 #                             [-34.6687169,  -33.09039672,  22.36229081],
 #                             [ 12.14623706,  22.36229081,  22.00951783]]) #  in Mrad/s
 
+#For FAD
 
+N5 = [[-2.84803, 0.0739994, -1.75741],
+[0.0739994, -2.5667, 0.326813],
+[-1.75741, 0.326813, 53.686]]
 
-#  Function to sample points on a Fibonacci sphere
+N10 = [[-0.0979402, 0.00195169, 1.80443],
+[0.00195169, -0.513124, -0.508695],
+[1.80443, -0.508695, 19.109]]
+
+#For Trp
+
+N1 = [[-1.94218, -0.0549954, -0.21326],
+[-0.0549954, -2.29723, -0.441875],
+[-0.21326, -0.441875, 19.156]]
+
+H1 = [[-2.14056, 6.31534, 0.17339],
+[6.31534, -18.9038, -0.0420204],
+[0.17339, -0.0420204, -14.746]]
+
+# Function to sample points on a Fibonacci sphere
 def fibonacci_sphere(samples):
     phi = np.pi * (3. - np.sqrt(5.))  # Golden angle in radians
     xyz = []
@@ -95,18 +113,21 @@ def point_dipole_dipole_coupling(r):
  
     return A
 
-def compute_zyz_rotation_tensor(psi, theta, phi):
-    def Ry(gamma):
-        return np.matrix([[ m.cos(gamma), 0, m.sin(gamma)],
-                        [ 0           , 1, 0           ],
-                        [-m.sin(gamma), 0, m.cos(gamma)]])
+def compute_zxz_rotation_tensor(orientation):
+    psi = orientation[0]
+    theta = orientation[1]
+    phi = orientation[2]
+    def Rx(gamma):
+        return np.matrix([[ 1, 0           , 0           ],
+                        [ 0, np.cos(gamma),-np.sin(gamma)],
+                        [ 0, np.sin(gamma), np.cos(gamma)]])
     
     def Rz(gamma):
-        return np.matrix([[ m.cos(gamma), -m.sin(gamma), 0 ],
-                        [ m.sin(gamma), m.cos(gamma) , 0 ],
+        return np.matrix([[ np.cos(gamma), -np.sin(gamma), 0 ],
+                        [ np.sin(gamma), np.cos(gamma) , 0 ],
                         [ 0           , 0            , 1 ]])
 
-    R = Rz(psi) * Ry(theta) * Rz(phi)
+    R = Rz(psi) * Rx(theta) * Rz(phi)
     return R
 
 # Function to perform the simulation
@@ -119,11 +140,12 @@ def run_simulation(parameters):
     kDC = parameters['kDC']
     num_orientation_samples = parameters['num_orientation_samples']
     dims = parameters['dims'] # Dimensions of system components (2 qubits, 1 spin-1 nucleus) 
-    r = parameters['r']
-    psi = parameters['psi']
-    theta = parameters['theta']
-    phi = parameters['phi']
-    
+    FAD_r = parameters['FAD_r'] 
+    Trp_r = parameters['Trp_r']
+    FAD_orientation = parameters['FAD_orientation']
+    Trp_orientation = parameters['Trp_orientation']
+    FAD_d= parameters['FAD_d']
+    Trp_d = parameters['Trp_d']
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
     
@@ -177,17 +199,28 @@ def run_simulation(parameters):
     yr_c_list = []  # List to store singlet yield for component C
     yr_d_list = []  # List to store singlet yield for component D
 
-    rotation = compute_zyz_rotation_tensor(psi, theta, phi)
+    FAD_R = compute_zxz_rotation_tensor(FAD_orientation)
+    Trp_R = compute_zxz_rotation_tensor(Trp_orientation)
     # rotated_ErC_Dee= rotation @ ErC_Dee @ rotation.T
     #rotated_ErD_Dee= rotation @ ErD_Dee @ rotation.T
+    
+    N5_rotated = FAD_R.T @ N5 @ FAD_R
+    N10_rotated = FAD_R.T @ N10 @ FAD_R
+    N1_rotated = Trp_R.T @ N1 @ Trp_R
+    H1_rotated = Trp_R.T @ H1 @ Trp_R
+
+    FAD_r_new = FAD_d + FAD_R.T @ FAD_r
+    Trp_r_new = Trp_d + Trp_R.T @ Trp_r
+    ErFAD_Dee = point_dipole_dipole_coupling(FAD_r_new)
+    ErTrp_Dee = point_dipole_dipole_coupling(Trp_r_new)
 
     for field in B_fields:
         #Compute Hamiltonians for each orientation
         Hzee = mkH1(dims, 0, field) + mkH1(dims, 1, field)  # Zeeman Hamiltonian for two spins
-        Hhfc_C = mkH12(dims, 0, 2, N5_C) + mkH12(dims, 1, 3, N1_C)
-        Hhfc_D = mkH12(dims, 0, 2, N5_D) + mkH12(dims, 1, 4, N1_D)
-        Hdee_C = mkH12(dims, 0, 1, ErC_Dee)
-        Hdee_D = mkH12(dims, 0, 1, ErD_Dee)
+        Hhfc_C = mkH12(dims, 0, 2, N5_rotated) + mkH12(dims, 1, 3, N10_rotated)
+        Hhfc_D = mkH12(dims, 0, 2, N1_rotated) + mkH12(dims, 1, 4, H1_rotated)
+        Hdee_C = mkH12(dims, 0, 1, ErFAD_Dee)
+        Hdee_D = mkH12(dims, 0, 1, ErTrp_Dee)
         H0_C = Hzee + Hhfc_C + Hdee_C  # Total Hamiltonian for component C
         H0_D = Hzee + Hhfc_D + Hdee_D  # Total Hamiltonian for component D
         H_C = H0_C.data.as_scipy()
@@ -253,30 +286,54 @@ if __name__ == "__main__":
         'kCDs': np.logspace(-2, 4, 7), # change the number of points so that there a slightly more points for one of the rate constants than the other (retu)
         'kDCs': np.logspace(-2, 4, 6),
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
-        'num_orientation_samples': 10      # Number of samples (unused here, just an example)
-        'rs': np.linspace(1.0, 10.0, 5)
-        'psis': np.linspace(0, np.pi/2, 5)
-        'thetas': np.linspace(0, np.pi/4, 5)
-        'phis': np.linspace(0, np.pi/2, 5)
+        'num_orientation_samples': 10,      # Number of samples (unused here, just an example)
+        'FAD_rs': [[1.05272,	0.474844,	9.61309*10**-17],
+        [0.349471,	-0.685166,	-0.0232927],
+        [1.05867,	-1.91279,	-0.0166991],
+        [0.429269,	-3.15141,	-0.0697218],
+        [1.24726,	-4.42354,	-0.0596015],
+        [-0.982216,	-3.19343,	-0.149678],
+        [-1.72019,	-4.50846,	-0.253066],
+        [-1.70664,	-1.99109,	-0.150443],
+        [-1.07843,	-0.744145,	-0.0631673],
+        [-1.79304,	0.474844,	0.],
+        [-1.09023,	1.68232,	-0.0234944],
+        [-1.81808,	2.81296,	0.0106907],
+        [-1.78693,	5.10798,	0.0711242],
+        [0.210804,	4.01406,	0.021478],
+        [1.05059,	2.89559,	-0.0125263],
+        [2.27577,	3.0514,	-0.019355],
+        [0.329372,	1.62462,	-0.0232927]],  # Coordinates of core (i.e. ring) atoms of FAD cantered on centre of spin density and aligned to molecular axes
+        'Trp_rs':[[1.77314,	0.978905,	0.0187266],
+        [0.700867,	1.77992,	0.0377116],
+        [-0.493628,	0.999096,	0.010858],
+        [-0.0625267,	-0.363978,	0.],
+        [-0.743141,	-1.60399,	0.0289536],
+        [0.0136988,	-2.78355,	0.0446603],
+        [1.40985,	-2.74558,	0.030763],
+        [2.11628,	-1.51743,	0.012728],
+        [1.36023,	-0.363978,	0.]], # Coordinates of core (i.e. ring) atoms of Trp cantered on centre of spin density and aligned to molecular axes (first column: atomic number; columns 2 to 4: x, y, and z-coordinates in Angstroms)
+        'FAD_orientation': [119.982, 129.967, 353.895], # Euler angles to be used in rotation tensors 
+        'Trp_orientation': [70.,	81.5553, 1.12128],
+        'FAD_d': [10.1746,-13.3164,5.18675], # dislacement vector for FAD
+        'Trp_d': [9.21606,-18.14,3.32885] # displacemet vector for Trp 
     }
     
     # Get all combinations of kCDs and kDCs
     kCDs = params['kCDs']
     kDCs = params['kDCs']
-    rs = params['rs']
-    psis = params['psis']
-    thetas = params['thetas']
-    phis = params['phis']
+    FAD_rs = params['FAD_rs']
+    Trp_rs = params['Trp_rs']
 
-    combinations = list(product(kCDs, kDCs, rs, psis, thetas, phis))
+    combinations = list(product(kCDs, kDCs, FAD_rs, Trp_rs))
 
     # Prepare the yields array (len(kCDs) x len(kDCs) x 3)
-    yields = np.zeros((len(kCDs), len(kDCs), len(rs), len(psis), len(thetas), len(phis), 3))
+    yields = np.zeros((len(kCDs), len(kDCs), len(FAD_rs), len(Trp_rs), 3))
 
     # Create a list of parameter combinations for multiprocessing
     parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
                             'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': kCD, 'kDC': kDC, 'r': r, 'psi': psi, 'theta': theta, 'phi': phi } for kCD, kDC, r, psi, theta, phi in combinations]
+                            'kCD': kCD, 'kDC': kDC,'FAD_r':FAD_r, 'Trp_r': Trp_r, 'FAD_orientation':params['FAD_orientation'], 'Trp_orientation': params['Trp_orientation'], 'FAD_d': params['FAD_d'], 'Trp_d': params['Trp_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
 
     # Run simulations in parallel using multiprocessing
     with multiprocessing.Pool(processes=16) as pool:
