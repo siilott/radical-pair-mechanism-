@@ -130,6 +130,43 @@ def compute_zxz_rotation_tensor(orientation):
     R = Rz(psi) * Rx(theta) * Rz(phi)
     return R
 
+def moser_dutton_rate(delta_G, r, lam, A=13, B=0.7, C=3.1, D=0.06, R0=3.6):
+    """
+    Calculate the electron transfer rate using the Moser-Dutton ruler.
+    
+    Parameters:
+    - delta_G : float : Free energy difference (ΔG°, in eV)
+    - r       : float : Distance between donor and acceptor (Å)
+    - lam     : float : Reorganization energy (λ, in eV) [default = 0.2-1.5]
+    - A       : float : Distance of optimal electron transfer (Å) [default = 13-15]
+    - beta    : float : electronic wave function penetration through the protein medium (Å^-1) [default = 0.9=2.0 ]
+    - B       : float : Decay constant (Å^-1) [default = beta/ 2.303] 
+    - C       : float : Quantized nuclear term (eV^-1) [default = 3.1]
+    - D       : float : Energy barrier term (eV) [default = 0.06]
+    - R0      : float : van der Waals contact distance (Å) [default = 3.6]
+    
+    Returns:
+    - k_ET    : float : Electron transfer rate (s^-1)
+    """
+    # Ensure inputs are within reasonable physical limits
+    if r <= R0:
+        raise ValueError("Distance (r) must be greater than van der Waals contact distance (R0).")
+    if lam <= 0:
+        raise ValueError("Reorganization energy (λ) must be positive.")
+
+    # Calculate distance-dependent term
+    distance_term = -B * (r - R0)
+    
+    # Calculate energy-dependent term
+    energy_term = -C * ((delta_G + lam) ** 2 / (4 * lam) - D)
+    
+    # Combine terms to calculate the rate
+    log_k_ET = distance_term + energy_term
+    k_ET = 10 ** log_k_ET  # Convert from log10 to actual rate
+    
+    return k_ET
+
+
 # Function to perform the simulation
 def run_simulation(parameters):
     b0 = parameters['b0']
@@ -142,10 +179,10 @@ def run_simulation(parameters):
     dims = parameters['dims'] # Dimensions of system components (2 qubits, 1 spin-1 nucleus) 
     FAD_r = parameters['FAD_r'] 
     Trp_r = parameters['Trp_r']
-    FAD_orientation = parameters['FAD_orientation']
-    Trp_orientation = parameters['Trp_orientation']
-    FAD_d= parameters['FAD_d']
-    Trp_d = parameters['Trp_d']
+    TrpC_orientation = parameters['TrpC_orientation']
+    TrpD_orientation = parameters['TrpD_orientation']
+    TrpC_d= parameters['TrpC_d']
+    TrpD_d = parameters['TrpD_d']
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
     
@@ -199,28 +236,26 @@ def run_simulation(parameters):
     yr_c_list = []  # List to store singlet yield for component C
     yr_d_list = []  # List to store singlet yield for component D
 
-    FAD_R = compute_zxz_rotation_tensor(FAD_orientation)
-    Trp_R = compute_zxz_rotation_tensor(Trp_orientation)
+    TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
+    TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
     # rotated_ErC_Dee= rotation @ ErC_Dee @ rotation.T
     #rotated_ErD_Dee= rotation @ ErD_Dee @ rotation.T
     
-    N5_rotated = FAD_R.T @ N5 @ FAD_R
-    N10_rotated = FAD_R.T @ N10 @ FAD_R
-    N1_rotated = Trp_R.T @ N1 @ Trp_R
-    H1_rotated = Trp_R.T @ H1 @ Trp_R
+    N1_rotated_C = TrpC_R.T @ N1 @ TrpC_R
+    N1_rotated_D = TrpD_R.T @ N1 @ TrpD_R
 
-    FAD_r_new = FAD_d + FAD_R.T @ FAD_r
-    Trp_r_new = Trp_d + Trp_R.T @ Trp_r
-    ErFAD_Dee = point_dipole_dipole_coupling(FAD_r_new)
-    ErTrp_Dee = point_dipole_dipole_coupling(Trp_r_new)
-
+    TrpC_r_new = TrpC_d + TrpC_R.T @ TrpC_r
+    TrpD_r_new = TrpD_d + TrpD_R.T @ TrpD_r
+    ErTrpC_Dee = point_dipole_dipole_coupling(TrpC_r_new)
+    ErTrpD_Dee = point_dipole_dipole_coupling(TrpD_r_new)
+    
     for field in B_fields:
         #Compute Hamiltonians for each orientation
         Hzee = mkH1(dims, 0, field) + mkH1(dims, 1, field)  # Zeeman Hamiltonian for two spins
-        Hhfc_C = mkH12(dims, 0, 2, N5_rotated) + mkH12(dims, 1, 3, N1_rotated)
-        Hhfc_D = mkH12(dims, 0, 2, N1_rotated) + mkH12(dims, 1, 4, H1_rotated)
-        Hdee_C = mkH12(dims, 0, 1, ErFAD_Dee)
-        Hdee_D = mkH12(dims, 0, 1, ErTrp_Dee)
+        Hhfc_C = mkH12(dims, 0, 2, N5) + mkH12(dims, 1, 3, N1_rotated_C)
+        Hhfc_D = mkH12(dims, 0, 2, N5) + mkH12(dims, 1, 4, N1_rotated_D)
+        Hdee_C = mkH12(dims, 0, 1, ErTrpC_Dee)
+        Hdee_D = mkH12(dims, 0, 1, ErTrpD_Dee)
         H0_C = Hzee + Hhfc_C + Hdee_C  # Total Hamiltonian for component C
         H0_D = Hzee + Hhfc_D + Hdee_D  # Total Hamiltonian for component D
         H_C = H0_C.data.as_scipy()
@@ -313,10 +348,10 @@ if __name__ == "__main__":
         [1.40985,	-2.74558,	0.030763],
         [2.11628,	-1.51743,	0.012728],
         [1.36023,	-0.363978,	0.]], # Coordinates of core (i.e. ring) atoms of Trp cantered on centre of spin density and aligned to molecular axes (first column: atomic number; columns 2 to 4: x, y, and z-coordinates in Angstroms)
-        'FAD_orientation': np.array([119.982, 129.967, 353.895]), # Euler angles to be used in rotation tensors 
-        'Trp_orientation': np.array([70.,	81.5553, 1.12128]),
-        'FAD_d': np.array([10.1746,-13.3164,5.18675]), # dislacement vector for FAD
-        'Trp_d': np.array([9.21606,-18.14,3.32885]) # displacemet vector for Trp 
+        'TrpC_orientation': np.array([119.982, 129.967, 353.895]), # Euler angles to be used in rotation tensors 
+        'TrpD_orientation': np.array([70.,	81.5553, 1.12128]),
+        'TrpC_d': np.array([10.1746,-13.3164,5.18675]), # dislacement vector for TrpD
+        'TrpD_d': np.array([9.21606,-18.14,3.32885]) # displacemet vector for TrpC
     }
     
     # Get all combinations of kCDs and kDCs
@@ -333,18 +368,18 @@ if __name__ == "__main__":
     #Create a list of parameter combinations for multiprocessing
     parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
                             'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': kCD, 'kDC': kDC,'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'FAD_orientation':params['FAD_orientation'], 'Trp_orientation': params['Trp_orientation'], 'FAD_d': params['FAD_d'], 'Trp_d': params['Trp_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
+                            'kCD': kCD, 'kDC': kDC,'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
 
     # Run simulations in parallel using multiprocessing
     with multiprocessing.Pool() as pool:
         results = pool.map(run_simulation, parameter_combinations)
 
     # Store the results in the yields array
-    for idx, (kCD, kDC, FAD_r, Trp_r ) in enumerate(combinations): #+FAD_r, Trp_r?
+    for idx, (kCD, kDC, FAD_r, Trp_r ) in enumerate(combinations):
         i = np.where(kCDs == kCD)[0][0]
         j = np.where(kDCs == kDC)[0][0]
-        k = np.where(FAD_rs == FAD_rs)[0][0]
-        l = np.where(Trp_rs == Trp_rs)[0][0]
+        k = np.where(FAD_rs == FAD_r)[0][0]
+        l = np.where(Trp_rs == Trp_r)[0][0]
         yields[i, j, k, l, :] = results[idx]
 
     # Save the results to a .npz file
