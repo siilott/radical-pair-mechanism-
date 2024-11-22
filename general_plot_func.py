@@ -1,10 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-file = np.load('output.npz')
+file = np.load('/Users/sajai/Downloads/data2/FWW_100_0_1_150_fast.npz')
+print(file)
 yields = file["yields"][:,:,1]- file["yields"][:,:,0]
-kCDs = file["kCDs"]
-kDCs = file["kDCs"]
+kCDs = file["k12s"]
+kDCs = file["k21s"]
 
 # Create a meshgrid for plotting
 KCD, KDC = np.meshgrid(kCDs, kDCs)
