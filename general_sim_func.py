@@ -130,7 +130,8 @@ def compute_zxz_rotation_tensor(orientation):
     R = Rz(psi) * Rx(theta) * Rz(phi)
     return R
 
-def moser_dutton_rate(delta_G, r, lam, A=13, B=0.7, C=3.1, D=0.06, R0=3.6):
+
+def moser_dutton_rate(delta_G =0, r, lam=0.5, A=13, beta=1.5, B=0.7, C=3.1, D=0.06, R0=3.6):
     """
     Calculate the electron transfer rate using the Moser-Dutton ruler.
     
@@ -155,17 +156,16 @@ def moser_dutton_rate(delta_G, r, lam, A=13, B=0.7, C=3.1, D=0.06, R0=3.6):
         raise ValueError("Reorganization energy (λ) must be positive.")
 
     # Calculate distance-dependent term
-    distance_term = -B * (r - R0)
+    distance_term = A -B * (r - R0)
     
     # Calculate energy-dependent term
-    energy_term = -C * ((delta_G + lam) ** 2 / (4 * lam) - D)
+    energy_term = -C * (delta_G + lam) ** 2 /lam 
     
     # Combine terms to calculate the rate
     log_k_ET = distance_term + energy_term
     k_ET = 10 ** log_k_ET  # Convert from log10 to actual rate
     
     return k_ET
-
 
 # Function to perform the simulation
 def run_simulation(parameters):
@@ -248,6 +248,9 @@ def run_simulation(parameters):
     TrpD_r_new = TrpD_d + TrpD_R.T @ TrpD_r
     ErTrpC_Dee = point_dipole_dipole_coupling(TrpC_r_new)
     ErTrpD_Dee = point_dipole_dipole_coupling(TrpD_r_new)
+
+    FWc_rmin = TrpC_r_new - FAD_r
+    WcWd_rmin = TrpD_r_new - TrpC_r_new
     
     for field in B_fields:
         #Compute Hamiltonians for each orientation
