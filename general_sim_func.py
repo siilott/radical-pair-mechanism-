@@ -17,7 +17,7 @@ opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
              'p': lambda dim: qt.spin_Jp((dim-1)/2),
              'm': lambda dim: qt.spin_Jm((dim-1)/2),
              'i': qt.identity}
-             
+
 # Initializes ops as a list of identity matrices for each dimension in dims. Iterates over specs to replace the identity matrix at the specified index with the corresponding spin operator. Returns the tensor product of the operators in ops using qt.tensor.
 def mkSpinOp(dims, specs):
     ops = [qt.identity(d) for d in dims]
@@ -34,8 +34,9 @@ def mkH1(dims, ind, parvec):
 
 # Constructs a Hamiltonian for the interaction between two spin systems with interaction terms along all combinations of x, y, and z axes.
 def mkH12(dims, ind1, ind2, parmat):
-    axes = np.array(['x', 'y', 'z'])
+    axes = ['x', 'y', 'z']
     ops = []
+    parmat  = np.array(parmat)
     # Iterates over all combinations of the x, y, and z axes for the two spins. For each non-zero element in parmat, adds the corresponding spin-spin interaction term to the empty list ops.
     for i in range(3):
         for j in range(3):
@@ -360,7 +361,7 @@ def run_simulation(parameters):
     print(avg_yield)
     # print('compass sensitivity = ', compass_sensitivity) 
     # print('chi = ', chi)
-    return (min_yield, max_yield, avg_yield)
+    print([min_yield, max_yield, avg_yield])
 
 if __name__ == "__main__":
     # Base parameter set
@@ -427,6 +428,11 @@ if __name__ == "__main__":
 
     # with multiprocessing.Pool() as pool:
     #     results = pool.map(electron_transfer_rate, parameter_combinations)
+
+    # results = []
+    # for param_set in parameter_combinations:
+    #     result = run_simulation(param_set)
+    #     results.append(result)
 
     # Store the results in the transfer rates array
     for idx, (FAD_r, Trp_r) in enumerate(combinations):
