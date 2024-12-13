@@ -159,8 +159,8 @@ def moser_dutton_rate(r):
     """
 
     # Ensure inputs are within reasonable physical limits
-    if r <= R0:
-        raise ValueError("Distance(r) must be greater than van der Waals contact distance (R0).")
+    # if r <= R0:
+    #     raise ValueError("Distance(r) must be greater than van der Waals contact distance (R0).")
 
     # Calculate distance-dependent term
     distance_term = A - B * (r - R0)
@@ -197,42 +197,49 @@ def electron_transfer_rates(parameters):
         TrpD_rs.append(TrpD_r)
 
     # Compute the minimum distances 
-    FWc_rmins = np.array(distance.cdist(FAD_rs, TrpC_rs).min(axis=1))
-    WcWd_rmins = np.array(distance.cdist(TrpC_rs, TrpD_rs).min(axis=1))
-    closest_indices_FWc = FWc_rmins.argmin()
-    closest_indices_WcWd  = WcWd_rmins.argmin()
-    print(FWc_rmins)
+    FWc_rmins = distance.cdist(FAD_rs, TrpC_rs).min(axis=1)
+    WcWd_rmins = distance.cdist(TrpC_rs, TrpD_rs).min(axis=1)
+    # closest_indices_FWc = FWc_rmins.argmin()
+    # closest_indices_WcWd  = WcWd_rmins.argmin()
+    # print(FWc_rmins)
+    # print(WcWd_rmins)
 
     # Calculate the transfer rates using Moser-Dutton function 
     kCfs = []
-    kDfs = []
-    for FWc_rmin, WcWd_rmin  in enumerate(zip(FWc_rmins, WcWd_rmins)):
+    closest_indices_FWc = []
+    for FWc_rmin in FWc_rmins:
         kCf = moser_dutton_rate(FWc_rmin)
         kCfs.append(kCf)
+        closest_indice_FWc = FWc_rmins.argmin()
+        closest_indices_FWc.append(closest_indice_FWc)
+
+    kDfs = []
+    closest_indices_WcWd = []
+    for WcWd_rmin in  WcWd_rmins:
         kDf = moser_dutton_rate(WcWd_rmin)
         kDfs.append(kDf)
+        closest_indice_WcWd = WcWd_rmins.argmin()
+        closest_indices_WcWd.append(closest_indice_WcWd)
 
     # Prepare results for return
     closest_FWc_data = [
-        {"FAD_r": FAD_rs[i], "TrpC_r": TrpC_rs[idx], "distance": dist}
+        {"FAD_r": FAD_rs[i], "TrpC_r": TrpC_rs[idx], "FWc_rmin": dist,  "kCf": kCfs[i]}
         for i, (dist, idx) in enumerate(zip(FWc_rmins, closest_indices_FWc))
     ]
 
     closest_WcWd_data = [
-        {"TrpC_r": TrpC_rs[i], "TrpD_r": TrpD_rs[idx], "distance": dist}
+        {"TrpC_r": TrpC_rs[i], "TrpD_r": TrpD_rs[idx], "WcWd_rmin": dist, "kDf": kDfs[i]}
         for i, (dist, idx) in enumerate(zip(WcWd_rmins, closest_indices_WcWd))
     ]
 
     # Return all calculated data
     return {
-        "kCfs": kCfs,
-        "kDfs": kDfs,
         "closest_FWc_data": closest_FWc_data,
         "closest_WcWd_data": closest_WcWd_data,
     }
 
 # Function to perform the simulation
-def run_simulation(parameters,transfer_rates):
+def run_simulation(parameters):
     b0 = parameters['b0']
     krC = parameters['krC']
     krD = parameters['krD']
@@ -243,12 +250,10 @@ def run_simulation(parameters,transfer_rates):
     dims = parameters['dims'] # Dimensions of system components (2 qubits, 1 spin-1 nucleus) 
     TrpC_orientation = parameters['TrpC_orientation']
     TrpD_orientation = parameters['TrpD_orientation']
-    TrpC_d= parameters['TrpC_d']
-    TrpD_d = parameters['TrpD_d']
-    FAD_r = transfer_rates['FAD_r'] 
-    Trp_r = transfer_rates['Trp_r']
-    kCf = transfer_rates['kCf']
-    kDf = transfer_rates['kDf']
+    FWc_rmin = parameters['FWc_rmin'] 
+    WcWd_rmin = parameters['WcWd_rmin']
+    kCf = parameters['kCf']
+    kDf = parameters['kDf']
 
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
@@ -290,10 +295,6 @@ def run_simulation(parameters,transfer_rates):
     TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
     TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
 
-    # # Compute the position vectors for each contribution 
-    TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
-    TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
-
     def mesolve(t, combined_rho, P_s, HA, HB, dimA, dimB):
         # Reshape rho back to a matrix
         lenA = dimA * dimA
@@ -314,8 +315,8 @@ def run_simulation(parameters,transfer_rates):
     N1_rotated_C = TrpC_R.T @ N1 @ TrpC_R
     N1_rotated_D = TrpD_R.T @ N1 @ TrpD_R
 
-    ErTrpC_Dee = point_dipole_dipole_coupling(TrpC_r)
-    ErTrpD_Dee = point_dipole_dipole_coupling(TrpD_r)
+    ErTrpC_Dee = point_dipole_dipole_coupling(FWc_rmin)
+    ErTrpD_Dee = point_dipole_dipole_coupling(WcWd_rmin)
    
     for field in B_fields:
         #Compute Hamiltonians for each orientation
@@ -372,9 +373,6 @@ def run_simulation(parameters,transfer_rates):
     # print('total yield x=', total_yield_x)
     # print('total yeild y=', total_yield_y)
     # print('total yeild z=', total_yield_z)
-    print(min_yield)
-    print(max_yield)
-    print(avg_yield)
     # print('compass sensitivity = ', compass_sensitivity) 
     # print('chi = ', chi)
     print([min_yield, max_yield, avg_yield])
@@ -423,44 +421,34 @@ if __name__ == "__main__":
     }
     transfer_rates = electron_transfer_rates(params)
     print(transfer_rates)
+
+    # Get all combinations of kCfs and kDfs
+    closest_FWc_data = transfer_rates['closest_FWc_data']
+    closest_WcWd_data = transfer_rates['closest_WcWd_data']
+
+    combinations = list(product(closest_FWc_data, closest_WcWd_data))
+
+    #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
+    yields = np.zeros((len(closest_FWc_data['kCf']), len(closest_WcWd_data), 3))
+
+    #Create a list of parameter combinations for multiprocessing
+    parameter_combinations = [{**{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
+                        'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
+                            'kCD': params['kCD'], 'kDC': params['kDC'], 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']}, **fwc, **wcwd} for fwc, wcwd in combinations]
     
-    # Get all combinations of FAD_rs and Trp_rs
-    # FAD_rs = params['FAD_rs']
-    # Trp_rs = params['Trp_rs']
-
-    # combinations = list(product(FAD_rs, Trp_rs))
-
-    # #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
-    # yields = np.zeros((len(FAD_rs), len(Trp_rs), 3))
-    # #Prepare the transfer rates array 
-    # # transfer_rates = np.zeros((len(FAD_rs), len(Trp_rs), 2))
-
-    # #Create a list of parameter combinations for multiprocessing
-    # parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
-    #                         'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-    #                         'kCD': params['kCD'], 'kDC': params['kDC'],'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for FAD_r, Trp_r in combinations]
-
-    # # Run simulations in parallel using multiprocessing
-    # with multiprocessing.Pool() as pool:
-    #     results = pool.map(run_simulation, parameter_combinations)
-
-    # with multiprocessing.Pool() as pool:
-    #     results = pool.map(electron_transfer_rate, parameter_combinations)
-
-    # results = []
-    # for param_set in parameter_combinations:
-    #     result = run_simulation(param_set)
-    #     results.append(result)
+    # Run simulations in parallel using multiprocessing
+    with multiprocessing.Pool() as pool:
+        results = pool.map(run_simulation, parameter_combinations)
 
     # Store the results in the transfer rates array
-    # for idx, (FAD_r, Trp_r) in enumerate(combinations):
-    #     i = next((idx for idx, val in enumerate(FAD_rs) if np.allclose(val, FAD_r)), None)
-    #     j = next((idx for idx, val in enumerate(Trp_rs) if np.allclose(val, Trp_r)), None)
+    for idx, combination in enumerate(parameter_combinations):
+        i = combination.get("kCf")
+        j = combination.get("kDf")
+        k = combination.get("FWc_rmin")
+        l = combination.get("WcWd_rmin")
+        yields[i, j, k, l, :] = results[idx]
 
-    #     if i is not None and j is not None:
-    #         yields[i, j, :] = results[idx]
 
-
-    # Save the results to a .npz file
-    np.savez('output.npz', FAD_rs == FAD_rs, Trp_rs == Trp_rs, yields=yields)
+    # #Save the results to a .npz file
+    np.savez('output.npz', kCFs == kCfs, kDfs == kDfs, yields=yields)
     print("--- %s seconds ---" % (time.time() - start_time))
