@@ -8,6 +8,7 @@ import time
 from scipy.integrate import ode
 from itertools import product
 import multiprocessing 
+
 start_time = time.time()
 # This dictionary maps string keys ('x', 'y', 'z', 'p', 'm', 'i') to functions that generate spin operators for a given dimension dim.
 opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
@@ -16,21 +17,24 @@ opstr2fun = {'x': lambda dim: qt.spin_Jx((dim-1)/2),
              'p': lambda dim: qt.spin_Jp((dim-1)/2),
              'm': lambda dim: qt.spin_Jm((dim-1)/2),
              'i': qt.identity}
+             
 # Initializes ops as a list of identity matrices for each dimension in dims. Iterates over specs to replace the identity matrix at the specified index with the corresponding spin operator. Returns the tensor product of the operators in ops using qt.tensor.
 def mkSpinOp(dims, specs):
     ops = [qt.identity(d) for d in dims]
     for ind, opstr in specs:
         ops[ind] = ops[ind] * opstr2fun[opstr](dims[ind])
     return qt.tensor(ops)
+    
 # Constructs a Hamiltonian for a single spin system with interactions along the x, y, and z axes.
 def mkH1(dims, ind, parvec):
     axes = ['x', 'y', 'z']
     # Creates a list of spin operators weighted by the corresponding parameters in parvec (ignores zero parameters). Uses functools.reduce to sum these weighted spin operators.
     return functools.reduce(lambda a, b: a + b, 
                [v * mkSpinOp(dims, [(ind,ax)]) for v, ax in zip(parvec, axes) if v!=0])
+
 # Constructs a Hamiltonian for the interaction between two spin systems with interaction terms along all combinations of x, y, and z axes.
 def mkH12(dims, ind1, ind2, parmat):
-    axes = ['x', 'y', 'z']
+    axes = np.array(['x', 'y', 'z'])
     ops = []
     # Iterates over all combinations of the x, y, and z axes for the two spins. For each non-zero element in parmat, adds the corresponding spin-spin interaction term to the empty list ops.
     for i in range(3):
@@ -65,7 +69,6 @@ def mkH12(dims, ind1, ind2, parmat):
 #                             [ 12.14623706,  22.36229081,  22.00951783]]) #  in Mrad/s
 
 #For FAD
-
 N5 = [[-2.84803, 0.0739994, -1.75741],
 [0.0739994, -2.5667, 0.326813],
 [-1.75741, 0.326813, 53.686]]
@@ -75,7 +78,6 @@ N10 = [[-0.0979402, 0.00195169, 1.80443],
 [1.80443, -0.508695, 19.109]]
 
 #For Trp
-
 N1 = [[-1.94218, -0.0549954, -0.21326],
 [-0.0549954, -2.29723, -0.441875],
 [-0.21326, -0.441875, 19.156]]
@@ -127,11 +129,17 @@ def compute_zxz_rotation_tensor(orientation):
                         [ np.sin(gamma), np.cos(gamma) , 0 ],
                         [ 0           , 0            , 1 ]])
 
-    R = Rz(psi) * Rx(theta) * Rz(phi)
+    R = Rz(psi) @ Rx(theta) @ Rz(phi)
     return R
 
+def moser_dutton_rate(r):
+    delta_G = 0
+    lam = 0.2
+    A = 13
+    B = 0.4
+    C=3.1
+    R0=3.6
 
-def moser_dutton_rate(delta_G =0, r, lam=0.5, A=13, beta=1.5, B=0.7, C=3.1, D=0.06, R0=3.6):
     """
     Calculate the electron transfer rate using the Moser-Dutton ruler.
     
@@ -140,23 +148,20 @@ def moser_dutton_rate(delta_G =0, r, lam=0.5, A=13, beta=1.5, B=0.7, C=3.1, D=0.
     - r       : float : Distance between donor and acceptor (Å)
     - lam     : float : Reorganization energy (λ, in eV) [default = 0.2-1.5]
     - A       : float : Distance of optimal electron transfer (Å) [default = 13-15]
-    - beta    : float : electronic wave function penetration through the protein medium (Å^-1) [default = 0.9=2.0 ]
     - B       : float : Decay constant (Å^-1) [default = beta/ 2.303] 
-    - C       : float : Quantized nuclear term (eV^-1) [default = 3.1]
-    - D       : float : Energy barrier term (eV) [default = 0.06]
+    - C       : float : Quantized nuclear term (eV^-1) [default = 3.1] (incorrect terminology, check literature)
     - R0      : float : van der Waals contact distance (Å) [default = 3.6]
-    
+
     Returns:
     - k_ET    : float : Electron transfer rate (s^-1)
     """
+
     # Ensure inputs are within reasonable physical limits
     if r <= R0:
-        raise ValueError("Distance (r) must be greater than van der Waals contact distance (R0).")
-    if lam <= 0:
-        raise ValueError("Reorganization energy (λ) must be positive.")
+        raise ValueError("Distance(r) must be greater than van der Waals contact distance (R0).")
 
     # Calculate distance-dependent term
-    distance_term = A -B * (r - R0)
+    distance_term = A - B * (r - R0)
     
     # Calculate energy-dependent term
     energy_term = -C * (delta_G + lam) ** 2 /lam 
@@ -164,8 +169,40 @@ def moser_dutton_rate(delta_G =0, r, lam=0.5, A=13, beta=1.5, B=0.7, C=3.1, D=0.
     # Combine terms to calculate the rate
     log_k_ET = distance_term + energy_term
     k_ET = 10 ** log_k_ET  # Convert from log10 to actual rate
-    
+
     return k_ET
+
+# Function to calculate the electron transfer rate for the different position vectors 
+def electron_transfer_rate(parameters):
+    FAD_r = parameters['FAD_r'] 
+    Trp_r = parameters['Trp_r']
+    TrpC_orientation = parameters['TrpC_orientation']
+    TrpD_orientation = parameters['TrpD_orientation']
+    TrpC_d= parameters['TrpC_d']
+    TrpD_d = parameters['TrpD_d']
+
+    # Compute the rotation tensor for TrpC and TrpD
+    TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
+    TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
+
+    # Compute the position vectors for each contribution 
+    TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
+    TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
+
+    # Find the minimum distance between vectors 
+    FWc_rmin = TrpC_r - FAD_r
+    WcWd_rmin = TrpD_r - TrpC_r
+
+    # Take the magnitude of each vector
+    FWc_rmin_magnitude = np.linalg.norm(FWc_rmin)
+    WcWd_rmin_magnitude = np.linalg.norm(WcWd_rmin)
+
+    # Calculate the transfer rate using Moser-Dutton function 
+    FWc_transfer_rate = moser_dutton_rate(FWc_rmin_magnitude)
+    WcWd_transfer_rate = moser_dutton_rate(WcWd_rmin_magnitude)
+
+    #return values 
+    print(FWc_transfer_rate, WcWd_transfer_rate)
 
 # Function to perform the simulation
 def run_simulation(parameters):
@@ -183,6 +220,7 @@ def run_simulation(parameters):
     TrpD_orientation = parameters['TrpD_orientation']
     TrpC_d= parameters['TrpC_d']
     TrpD_d = parameters['TrpD_d']
+
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
     
@@ -219,6 +257,26 @@ def run_simulation(parameters):
     initial_state = np.concatenate((rho0_C, rho0_D)).flatten()
     Ps = Ps.data.as_scipy()
 
+    # Compute the rotation tensor for TrpC and TrpD
+    TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
+    TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
+
+    # Compute the position vectors for each contribution 
+    TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
+    TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
+
+    # Find the minimum distance between vectors 
+    FWc_rmin = TrpC_r - FAD_r
+    WcWd_rmin = TrpD_r - TrpC_r
+
+    # Take the magnitude of each vector
+    FWc_rmin_magnitude = np.linalg.norm(FWc_rmin)
+    WcWd_rmin_magnitude = np.linalg.norm(WcWd_rmin)
+
+    # Calculate the transfer rate using Moser-Dutton function 
+    kCf = moser_dutton_rate(FWc_rmin_magnitude)
+    kDf = moser_dutton_rate(WcWd_rmin_magnitude)
+
     def mesolve(t, combined_rho, P_s, HA, HB, dimA, dimB):
         # Reshape rho back to a matrix
         lenA = dimA * dimA
@@ -227,31 +285,21 @@ def run_simulation(parameters):
         rhoB = combined_rho[lenB:].reshape((dimB, dimB))
         
         # Compute the derivative of rho
-        drhoA_dt = -1j * (HA @ rhoA - rhoA @ HA) - krC/2*(P_s @ rhoA + rhoA @ P_s) - (kCD+kf)*rhoA + kDC*rhoB
-        drhoB_dt = -1j * (HB @ rhoB - rhoB @ HB) - krD/2*(P_s @ rhoB + rhoB @ P_s) - (kDC+kf)*rhoB + kCD*rhoA
+        drhoA_dt = -1j * (HA @ rhoA - rhoA @ HA) - krC/2*(P_s @ rhoA + rhoA @ P_s) - (kCD+kCf)*rhoA + kDC*rhoB
+        drhoB_dt = -1j * (HB @ rhoB - rhoB @ HB) - krD/2*(P_s @ rhoB + rhoB @ P_s) - (kDC+kDf)*rhoB + kCD*rhoA
         
         # Flatten the derivative to a vector
         return np.concatenate((drhoA_dt.flatten(), drhoB_dt.flatten()))
 
     yr_c_list = []  # List to store singlet yield for component C
     yr_d_list = []  # List to store singlet yield for component D
-
-    TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
-    TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
-    # rotated_ErC_Dee= rotation @ ErC_Dee @ rotation.T
-    #rotated_ErD_Dee= rotation @ ErD_Dee @ rotation.T
     
     N1_rotated_C = TrpC_R.T @ N1 @ TrpC_R
     N1_rotated_D = TrpD_R.T @ N1 @ TrpD_R
 
-    TrpC_r_new = TrpC_d + TrpC_R.T @ TrpC_r
-    TrpD_r_new = TrpD_d + TrpD_R.T @ TrpD_r
-    ErTrpC_Dee = point_dipole_dipole_coupling(TrpC_r_new)
-    ErTrpD_Dee = point_dipole_dipole_coupling(TrpD_r_new)
-
-    FWc_rmin = TrpC_r_new - FAD_r
-    WcWd_rmin = TrpD_r_new - TrpC_r_new
-    
+    ErTrpC_Dee = point_dipole_dipole_coupling(TrpC_r)
+    ErTrpD_Dee = point_dipole_dipole_coupling(TrpD_r)
+   
     for field in B_fields:
         #Compute Hamiltonians for each orientation
         Hzee = mkH1(dims, 0, field) + mkH1(dims, 1, field)  # Zeeman Hamiltonian for two spins
@@ -318,11 +366,11 @@ if __name__ == "__main__":
     # Base parameter set
     params = {
         'b0': 1.4 * 2 * np.pi,  # Zeeman field strength in radians per microsecond
-        'krC': 5.5,             # Default values, will be overridden
+        'krC': 5.0,             # Default values, will be overridden
         'krD': 0,
         'kf': 1.0,
-        'kCDs': np.logspace(-2, 4, 7), # change the number of points so that there a slightly more points for one of the rate constants than the other (retu)
-        'kDCs': np.logspace(-2, 4, 6),
+        'kCD': 60255.95860743581, # change the number of points so that there a slightly more points for one of the rate constants than the other 
+        'kDC': 10e5,
         'dims': [2, 2, 2, 2, 2],  # Dimensions of system components (2 qubits, 1 spin-1 nucleus)
         'num_orientation_samples': 10,      # Number of samples (unused here, just an example)
         'FAD_rs':[[1.05272,	0.474844,	9.61309*10**-17],
@@ -357,34 +405,37 @@ if __name__ == "__main__":
         'TrpD_d': np.array([9.21606,-18.14,3.32885]) # displacemet vector for TrpC
     }
     
-    # Get all combinations of kCDs and kDCs
-    kCDs = params['kCDs']
-    kDCs = params['kDCs']
+    # Get all combinations of FAD_rs and Trp_rs
     FAD_rs = params['FAD_rs']
     Trp_rs = params['Trp_rs']
 
-    combinations = list(product(kCDs, kDCs, FAD_rs, Trp_rs))
+    combinations = list(product(FAD_rs, Trp_rs))
 
     #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
-    yields = np.zeros((len(kCDs), len(kDCs), len(FAD_rs), len(Trp_rs), 3))
+    yields = np.zeros((len(FAD_rs), len(Trp_rs), 3))
+    #Prepare the transfer rates array 
+    # transfer_rates = np.zeros((len(FAD_rs), len(Trp_rs), 2))
 
     #Create a list of parameter combinations for multiprocessing
     parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
                             'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': kCD, 'kDC': kDC,'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for kCD, kDC, FAD_r, Trp_r in combinations]
+                            'kCD': params['kCD'], 'kDC': params['kDC'],'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for FAD_r, Trp_r in combinations]
 
     # Run simulations in parallel using multiprocessing
     with multiprocessing.Pool() as pool:
         results = pool.map(run_simulation, parameter_combinations)
 
-    # Store the results in the yields array
-    for idx, (kCD, kDC, FAD_r, Trp_r ) in enumerate(combinations):
-        i = np.where(kCDs == kCD)[0][0]
-        j = np.where(kDCs == kDC)[0][0]
-        k = np.where(FAD_rs == FAD_r)[0][0]
-        l = np.where(Trp_rs == Trp_r)[0][0]
-        yields[i, j, k, l, :] = results[idx]
+    # with multiprocessing.Pool() as pool:
+    #     results = pool.map(electron_transfer_rate, parameter_combinations)
+
+    # Store the results in the transfer rates array
+    for idx, (FAD_r, Trp_r) in enumerate(combinations):
+        i = next((idx for idx, val in enumerate(FAD_rs) if np.allclose(val, FAD_r)), None)
+        j = next((idx for idx, val in enumerate(Trp_rs) if np.allclose(val, Trp_r)), None)
+
+        if i is not None and j is not None:
+            yields[i, j, :] = results[idx]
 
     # Save the results to a .npz file
-    np.savez('output.npz', kCDs=kCDs, kDCs=kDCs, FAD_rs == FAD_rs, Trp_rs == Trp_rs, yields=yields)
+    np.savez('output.npz', FAD_rs == FAD_rs, Trp_rs == Trp_rs, yields=yields)
     print("--- %s seconds ---" % (time.time() - start_time))
