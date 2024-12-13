@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import qutip as qt
 import time
 from scipy.integrate import ode
+from scipy.spatial import distance
 from itertools import product
 import multiprocessing 
 
@@ -136,7 +137,7 @@ def compute_zxz_rotation_tensor(orientation):
 def moser_dutton_rate(r):
     delta_G = 0
     lam = 0.2
-    A = 13
+    A = 13.0
     B = 0.4
     C=3.1
     R0=3.6
@@ -174,9 +175,9 @@ def moser_dutton_rate(r):
     return k_ET
 
 # Function to calculate the electron transfer rate for the different position vectors 
-def electron_transfer_rate(parameters):
-    FAD_r = parameters['FAD_r'] 
-    Trp_r = parameters['Trp_r']
+def electron_transfer_rates(parameters):
+    FAD_rs = parameters['FAD_rs'] 
+    Trp_rs = parameters['Trp_rs']
     TrpC_orientation = parameters['TrpC_orientation']
     TrpD_orientation = parameters['TrpD_orientation']
     TrpC_d= parameters['TrpC_d']
@@ -186,27 +187,52 @@ def electron_transfer_rate(parameters):
     TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
     TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
 
+    TrpC_rs = []
+    TrpD_rs = []
     # Compute the position vectors for each contribution 
-    TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
-    TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
+    for Trp_r  in Trp_rs:
+        TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
+        TrpC_rs.append(TrpC_r)
+        TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
+        TrpD_rs.append(TrpD_r)
 
-    # Find the minimum distance between vectors 
-    FWc_rmin = TrpC_r - FAD_r
-    WcWd_rmin = TrpD_r - TrpC_r
+    # Compute the minimum distances 
+    FWc_rmins = np.array(distance.cdist(FAD_rs, TrpC_rs).min(axis=1))
+    WcWd_rmins = np.array(distance.cdist(TrpC_rs, TrpD_rs).min(axis=1))
+    closest_indices_FWc = FWc_rmins.argmin()
+    closest_indices_WcWd  = WcWd_rmins.argmin()
+    print(FWc_rmins)
 
-    # Take the magnitude of each vector
-    FWc_rmin_magnitude = np.linalg.norm(FWc_rmin)
-    WcWd_rmin_magnitude = np.linalg.norm(WcWd_rmin)
+    # Calculate the transfer rates using Moser-Dutton function 
+    kCfs = []
+    kDfs = []
+    for FWc_rmin, WcWd_rmin  in enumerate(zip(FWc_rmins, WcWd_rmins)):
+        kCf = moser_dutton_rate(FWc_rmin)
+        kCfs.append(kCf)
+        kDf = moser_dutton_rate(WcWd_rmin)
+        kDfs.append(kDf)
 
-    # Calculate the transfer rate using Moser-Dutton function 
-    FWc_transfer_rate = moser_dutton_rate(FWc_rmin_magnitude)
-    WcWd_transfer_rate = moser_dutton_rate(WcWd_rmin_magnitude)
+    # Prepare results for return
+    closest_FWc_data = [
+        {"FAD_r": FAD_rs[i], "TrpC_r": TrpC_rs[idx], "distance": dist}
+        for i, (dist, idx) in enumerate(zip(FWc_rmins, closest_indices_FWc))
+    ]
 
-    #return values 
-    print(FWc_transfer_rate, WcWd_transfer_rate)
+    closest_WcWd_data = [
+        {"TrpC_r": TrpC_rs[i], "TrpD_r": TrpD_rs[idx], "distance": dist}
+        for i, (dist, idx) in enumerate(zip(WcWd_rmins, closest_indices_WcWd))
+    ]
+
+    # Return all calculated data
+    return {
+        "kCfs": kCfs,
+        "kDfs": kDfs,
+        "closest_FWc_data": closest_FWc_data,
+        "closest_WcWd_data": closest_WcWd_data,
+    }
 
 # Function to perform the simulation
-def run_simulation(parameters):
+def run_simulation(parameters,transfer_rates):
     b0 = parameters['b0']
     krC = parameters['krC']
     krD = parameters['krD']
@@ -215,12 +241,14 @@ def run_simulation(parameters):
     kDC = parameters['kDC']
     num_orientation_samples = parameters['num_orientation_samples']
     dims = parameters['dims'] # Dimensions of system components (2 qubits, 1 spin-1 nucleus) 
-    FAD_r = parameters['FAD_r'] 
-    Trp_r = parameters['Trp_r']
     TrpC_orientation = parameters['TrpC_orientation']
     TrpD_orientation = parameters['TrpD_orientation']
     TrpC_d= parameters['TrpC_d']
     TrpD_d = parameters['TrpD_d']
+    FAD_r = transfer_rates['FAD_r'] 
+    Trp_r = transfer_rates['Trp_r']
+    kCf = transfer_rates['kCf']
+    kDf = transfer_rates['kDf']
 
     # Generate orientations on a Fibonacci sphere
     oris = fibonacci_sphere(num_orientation_samples)
@@ -262,21 +290,9 @@ def run_simulation(parameters):
     TrpD_R = compute_zxz_rotation_tensor(TrpD_orientation)
     TrpC_R = compute_zxz_rotation_tensor(TrpC_orientation)
 
-    # Compute the position vectors for each contribution 
+    # # Compute the position vectors for each contribution 
     TrpC_r = TrpC_d + TrpC_R.T @ Trp_r
     TrpD_r = TrpD_d + TrpD_R.T @ Trp_r
-
-    # Find the minimum distance between vectors 
-    FWc_rmin = TrpC_r - FAD_r
-    WcWd_rmin = TrpD_r - TrpC_r
-
-    # Take the magnitude of each vector
-    FWc_rmin_magnitude = np.linalg.norm(FWc_rmin)
-    WcWd_rmin_magnitude = np.linalg.norm(WcWd_rmin)
-
-    # Calculate the transfer rate using Moser-Dutton function 
-    kCf = moser_dutton_rate(FWc_rmin_magnitude)
-    kDf = moser_dutton_rate(WcWd_rmin_magnitude)
 
     def mesolve(t, combined_rho, P_s, HA, HB, dimA, dimB):
         # Reshape rho back to a matrix
@@ -405,26 +421,28 @@ if __name__ == "__main__":
         'TrpC_d': np.array([10.1746,-13.3164,5.18675]), # dislacement vector for TrpD
         'TrpD_d': np.array([9.21606,-18.14,3.32885]) # displacemet vector for TrpC
     }
+    transfer_rates = electron_transfer_rates(params)
+    print(transfer_rates)
     
     # Get all combinations of FAD_rs and Trp_rs
-    FAD_rs = params['FAD_rs']
-    Trp_rs = params['Trp_rs']
+    # FAD_rs = params['FAD_rs']
+    # Trp_rs = params['Trp_rs']
 
-    combinations = list(product(FAD_rs, Trp_rs))
+    # combinations = list(product(FAD_rs, Trp_rs))
 
-    #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
-    yields = np.zeros((len(FAD_rs), len(Trp_rs), 3))
-    #Prepare the transfer rates array 
-    # transfer_rates = np.zeros((len(FAD_rs), len(Trp_rs), 2))
+    # #Prepare the yields array (len(kCDs) x len(kDCs) x 3)
+    # yields = np.zeros((len(FAD_rs), len(Trp_rs), 3))
+    # #Prepare the transfer rates array 
+    # # transfer_rates = np.zeros((len(FAD_rs), len(Trp_rs), 2))
 
-    #Create a list of parameter combinations for multiprocessing
-    parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
-                            'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
-                            'kCD': params['kCD'], 'kDC': params['kDC'],'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for FAD_r, Trp_r in combinations]
+    # #Create a list of parameter combinations for multiprocessing
+    # parameter_combinations = [{'b0': params['b0'], 'krC': params['krC'], 'krD': params['krD'], 'kf': params['kf'],
+    #                         'dims': params['dims'], 'num_orientation_samples': params['num_orientation_samples'],
+    #                         'kCD': params['kCD'], 'kDC': params['kDC'],'FAD_r': np.array(FAD_r), 'Trp_r': np.array(Trp_r), 'TrpC_orientation':params['TrpC_orientation'], 'TrpD_orientation': params['TrpD_orientation'], 'TrpC_d': params['TrpC_d'], 'TrpD_d': params['TrpD_d']} for FAD_r, Trp_r in combinations]
 
-    # Run simulations in parallel using multiprocessing
-    with multiprocessing.Pool() as pool:
-        results = pool.map(run_simulation, parameter_combinations)
+    # # Run simulations in parallel using multiprocessing
+    # with multiprocessing.Pool() as pool:
+    #     results = pool.map(run_simulation, parameter_combinations)
 
     # with multiprocessing.Pool() as pool:
     #     results = pool.map(electron_transfer_rate, parameter_combinations)
@@ -435,12 +453,13 @@ if __name__ == "__main__":
     #     results.append(result)
 
     # Store the results in the transfer rates array
-    for idx, (FAD_r, Trp_r) in enumerate(combinations):
-        i = next((idx for idx, val in enumerate(FAD_rs) if np.allclose(val, FAD_r)), None)
-        j = next((idx for idx, val in enumerate(Trp_rs) if np.allclose(val, Trp_r)), None)
+    # for idx, (FAD_r, Trp_r) in enumerate(combinations):
+    #     i = next((idx for idx, val in enumerate(FAD_rs) if np.allclose(val, FAD_r)), None)
+    #     j = next((idx for idx, val in enumerate(Trp_rs) if np.allclose(val, Trp_r)), None)
 
-        if i is not None and j is not None:
-            yields[i, j, :] = results[idx]
+    #     if i is not None and j is not None:
+    #         yields[i, j, :] = results[idx]
+
 
     # Save the results to a .npz file
     np.savez('output.npz', FAD_rs == FAD_rs, Trp_rs == Trp_rs, yields=yields)
